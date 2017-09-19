@@ -1,12 +1,7 @@
 
+%problem 1
 %{
-double eta i_th0 r_th a_0 a_1 a_2 a_3 a_4;
-
-t_0 = 20; % Kelvin;
-% define the syms for vars
-double p t u i;
-
-
+organize parameters first:
 eta = 0.5
 i_th0 = 0.3e-3
 r_th = 2.6e3*1e-3 (mW~)
@@ -15,39 +10,17 @@ a_1 = -2.545e-5
 a_2 = 2.908e-7
 a_3 = -2.531e-10
 a_4 = 1.022e-12
-
-%load data
-
-
-%due to no linearity of semi conductor properties, we deduct the junction voltage
-R = (U(38)-U(1))/(I(38)-I(1));
-
+t_0 = 20 + 273 %K
+%}
+%the equation can be re-organized by following statements
+syms i u p t
+syms eta i_th0 r_th a_0 a_1 a_2 a_3 a_4 t_0
 
 exp1 = eta*(i-i_th0-a_0 -a_1*t^1 - a_2*t^2-a_3*t^3 - a_4*t^4 );
-exp1s = eta*(i-i_th0 - a_0);
 
 exp2 = t_0 + (i*u-p)*r_th;
-exp3 = t_0 + (i*(u-0.9)-p)*r_th; %consider junction vol
-exp4 = t_0 + (i^2*R)*r_th; %consider resistor model
 
-eqn1 = p == eta*(i-i_th0-a_0 -a_1*t^1 - a_2*t^2-a_3*t^3 - a_4*t^4 );
-eqn2 = t == t_0 + (i*u-p)*r_th;
-%}
-%test parameters
-%eqt_0_3f = subs(eqn2, {u,i,p}, {U(39), I(39), P(39)})
-%S01 = solve(eqt_0_3f, 'MaxDegree', 4, 'Real', true, 'ReturnConditions', true)
-%tt_0 = vpa(S01.t)
-%hopefully we have got t of initial point
-%result is no, the temperature is tooo high. so let's update the initial parameters.
-%find eta near P(I) ~ 0 point
-
-% i find the eta should be near 0.3
-%eta = 0.275;
-% then the Ith0 and Ioff should be 0.371. consider I<4A has good
-% linearity, i_th0 and a_0 should be 0.371 == ioff_0
-%ioff_0 = I(39)-P(39)/eta
-% then use min search for r_th a1 -- a4
-% prepare a functions
+expr_p = subs(exp1, t, exp2)
 
 
 %%then we have three way to find the parameters for dataset U I P
@@ -55,8 +28,55 @@ eqn2 = t == t_0 + (i*u-p)*r_th;
 % optimizing: https://cn.mathworks.com/help/matlab/math/optimizing-nonlinear-functions.html
 % machine learning: https://cn.mathworks.com/help/stats/nonlinear-regression-1.html
 %fun =  @poi(v, V);
+
+% we choose this method: non linear regression
+% https://cn.mathworks.com/help/stats/nonlinear-regression-1.html#btcg0wd
 load('L-I-20C.mat');
 V = [I U P];
-v0 = [ 1.246e-3, -2.545e-5, 2.908e-7, -2.531e-10, 1.022e-12, 0.2749, 0.3, 2.6]
-%bestx = fminsearch(fun, v0)
+%step 1: use curve fitting toolbox: custom equation to fit the initial eta
+%and other parameters, those parameters are (some + original value):
+v0 = [ 1.246e-3, -2.545e-5, 2.908e-7, -2.531e-10, 1.022e-12, 0.2749, 0.3, 2.6];
+%then use fitnlm nonlinear regression
 mdl = fitnlm(V, P, @poi, v0)
+%we have get optimized parameters
+v_optimized = table2array(mdl.Coefficients(:,1))
+%parameter for model 1 (old un improved)
+%[0.647406123904325;0.890093081570153;-0.00629197067468293;1.39999580648606e-05;-1.00193267010158e-08;0.118287357618833;0.946159603823576;4.08825381904842]];
+%plot t0 =20, for other temp, change t0 in the function 
+p20 = poi(v_optimized, V); %result check good
+plot(I, p20, I, P)
+% we should replace the p and u for the function inputs;
+% so defined another func of U = f(I) to derive U
+% we use a exponential curve fitting (2-terms) to get this funcs:
+% U = 1.973*exp(0.0292*I)- 0.6044*exp(-0.7988*I)
+p10 = poi_t(v_optimized, V, 10); %and so on for 30 90, unimproved model
+p30 = poi_t(v_optimized, V, 30);
+p50 = poi_t(v_optimized, V, 50);
+p70 = poi_t(v_optimized, V, 70);
+p90 = poi_t(v_optimized, V, 90);
+
+%improvements 1: when the p == 0, the discontinous part can be ripped off;
+mdl2 = fitnlm(V(39:end,:), P(39:end), @poi, v_optimized)
+v_op2 = table2array(mdl2.Coefficients(:,1));
+%[ 0.6437, 0.8178,-0.0060, 1.418e-5, -1.0611e-8, 0.1623,0.9424, 3.2926]
+%plot others and find the max t for the question (P<2mW @4-8mA)
+resa = zeros(size(I));
+for t=60:10:90
+    resa = poi_t(v_optimized, V, t); %can change new model's data
+    
+    if max(resa)<2
+        max_temp = t
+        break
+    end
+end
+% answer: the max_temp = 90 (old model) 
+%answer the max_temp = 60 (new model) use this one
+p10i = poi_t(v_op2, V, 10); %and so on for 30 90, improved model
+p30i = poi_t(v_op2, V, 30);
+p50i = poi_t(v_op2, V, 50);
+p70i = poi_t(v_op2, V, 70);
+p90i = poi_t(v_op2, V, 90);
+
+%more improvements: add the I U temperature characteristics;
+
+
